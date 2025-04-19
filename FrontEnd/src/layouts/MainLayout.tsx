@@ -1,10 +1,12 @@
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 const MainLayout = () => {
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const navigate = useNavigate();
 
+  // Hämta användarinfo
   useEffect(() => {
     const getUser = async () => {
       const { data } = await supabase.auth.getUser();
@@ -22,16 +24,17 @@ const MainLayout = () => {
     };
   }, []);
 
+  // Logga ut
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUserEmail(null);
+    navigate("/"); // 👈 Skickar till HomePage efter utloggning
   };
 
   return (
     <div className="flex h-screen">
       <aside className="w-60 bg-gray-800 text-white p-4 space-y-4">
         <h2 className="text-2xl font-bold mb-4">ScoutGuard</h2>
-
         <nav className="flex flex-col space-y-2">
           <Link to="/" className="hover:text-green-400">
             Dashboard
@@ -56,7 +59,7 @@ const MainLayout = () => {
               <p className="text-sm text-gray-300">Inloggad som {userEmail}</p>
               <button
                 onClick={handleLogout}
-                className="text-sm text-red-400 hover:text-red-300 underline"
+                className="text-sm text-red-400 hover:underline"
               >
                 Logga ut
               </button>
