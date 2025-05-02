@@ -12,9 +12,6 @@ def main():
         print("Ingen data hittades.")
         return
 
-    print("📊 Kör regression på actions vs goals_conceded...")
-
-    # Justerade kolumnnamn för att matcha Supabase/SQL
     y_column = "goals_conceded"
     x_columns = [col for col in df.columns if col != y_column and col != "player_id" and col != "date"]
 
