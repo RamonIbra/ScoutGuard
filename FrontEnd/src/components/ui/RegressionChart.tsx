@@ -36,7 +36,13 @@ export default function RegressionChart({ stats }: Props) {
             domain={[-1, 1]}
             tickFormatter={(tick) => tick.toFixed(2)}
           />
-          <YAxis type="category" dataKey="name" width={120} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={150}
+            interval={0}
+          />
+
           <Tooltip formatter={(value: number) => value.toFixed(3)} />
           <Bar dataKey="weight" isAnimationActive={false}>
             <LabelList
