@@ -14,9 +14,10 @@ interface Player {
 
 const DiscoverPlayersPage = () => {
   const [players, setPlayers] = useState<Player[]>([]);
-  const [myTeamPlayers, setMyTeamPlayers] = useState<Player[]>([]);
   const [recommendedPlayers, setRecommendedPlayers] = useState<Player[]>([]);
-  const [userTeamId, setUserTeamId] = useState<string | null>(null);
+  const [myTeamPlayers, setMyTeamPlayers] = useState<Player[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [userTeamId, setUserTeamId] = useState<string>("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -25,6 +26,7 @@ const DiscoverPlayersPage = () => {
       } = await supabase.auth.getUser();
 
       if (!user) return;
+      setCurrentUserId(user.id);
 
       const { data: userData } = await supabase
         .from("users")
@@ -35,12 +37,24 @@ const DiscoverPlayersPage = () => {
       const teamId = userData?.team_id;
       setUserTeamId(teamId);
 
-      const { data: playersData } = await supabase.from("players").select("*");
+      const { data: playersData } = await supabase
+        .from("players")
+        .select("*");
 
-      const allPlayers = playersData || [];
+      const { data: recommended } = await supabase
+        .from("recommended_players")
+        .select("player_id");
+
+      const recommendedIds = recommended?.map((r) => r.player_id) ?? [];
+
+      const allPlayers = playersData ?? [];
       setPlayers(allPlayers);
       setMyTeamPlayers(allPlayers.filter((p) => p.team_id === teamId));
-      setRecommendedPlayers(allPlayers.filter((p) => p.team_id !== teamId));
+      setRecommendedPlayers(
+        allPlayers.filter((p) =>
+          recommendedIds.includes(p.id)
+        )
+      );
     };
 
     fetchData();
@@ -55,7 +69,7 @@ const DiscoverPlayersPage = () => {
           <h2 className="text-l font-semibold mb-4">My Players</h2>
           <div className="grid gap-6 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             {myTeamPlayers.map((player) => (
-              <PlayerCard key={player.id} {...player} />
+              <PlayerCard key={player.id} {...player} currentUserId={currentUserId} currentUserTeamId={userTeamId} />
             ))}
           </div>
         </div>
@@ -68,8 +82,14 @@ const DiscoverPlayersPage = () => {
         <div className="lg:w-3/5 overflow-y-auto">
           <h2 className="text-xl font-semibold mb-4">Recommended Players</h2>
           <div className="grid gap-6 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
-            {recommendedPlayers.map((player) => (
-              <PlayerCard key={player.id} {...player} />
+          {recommendedPlayers.map((player) => (
+              <PlayerCard
+                key={player.id}
+                {...player}
+                currentUserId={currentUserId}
+                currentUserTeamId={userTeamId}
+                isRecommended={true}
+              />
             ))}
           </div>
         </div>

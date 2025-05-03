@@ -10,7 +10,7 @@ def main():
     team_id = user_res.data.get("team_id")
     print(f"team_id: {team_id}")
 
-    print("👥 Hämtar spelare i teamet...")
+    print("Hämtar spelare i teamet")
     players_res = supabase.table("players").select("id").eq("team_id", team_id).execute()
     player_ids = [p["id"] for p in players_res.data]
 
@@ -18,7 +18,7 @@ def main():
         print("Inga spelare hittades för detta team.")
         return
 
-    print("📦 Hämtar matchstatistik för lagets spelare...")
+    print("Hämtar matchstatistik för lagets spelare")
     result = supabase.table("player_match_stats").select("*").in_("player_id", player_ids).execute()
     df = pd.DataFrame(result.data)
 
