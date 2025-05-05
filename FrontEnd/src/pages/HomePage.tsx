@@ -7,6 +7,7 @@ type Stat = { name: string; weight: number };
 const DashboardPage = () => {
   const [stats, setStats] = useState<Stat[]>([]);
   const [r2, setR2] = useState<number | null>(null);
+  const [mspr, setMspr] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -25,6 +26,7 @@ const DashboardPage = () => {
 
       setStats(entries);
       setR2(data.r2 ?? null);
+      setMspr(data.mspr ?? null);
     };
 
     fetchData();
@@ -36,14 +38,29 @@ const DashboardPage = () => {
       <p className="text-muted-foreground mb-2">
         These player actions show the strongest statistical correlation with the number of goals conceded by the team.
       </p>
+
       {r2 !== null && (
-        <p className="text-sm text-gray-500 mb-6">
+        <p className="text-sm text-gray-500">
           Model explanatory power (R² = {r2.toFixed(3)}): explains about {(r2 * 100).toFixed(1)}% of the variance.
         </p>
       )}
+
+      {mspr !== null && (
+        <p className="text-sm text-gray-500 mb-4">
+          Mean Squared Prediction Residual (MSPR): {mspr.toFixed(4)}
+        </p>
+      )}
+
+      {r2 !== null && mspr !== null && r2 > 0.5 && mspr > 0.2 && (
+        <p className="text-sm text-red-600 mb-6">
+          Warning: High R² but high MSPR may indicate overfitting, the model fits your data well but may not generalize to new matches.
+        </p>
+      )}
+
       <RegressionChart stats={stats} />
     </div>
   );
 };
+
 
 export default DashboardPage;

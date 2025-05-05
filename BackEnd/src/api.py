@@ -47,8 +47,9 @@ def get_regression(user_id: str = ""):
     x_columns = [col for col in df.columns if col not in exclude_cols]
     df[x_columns + [y_column]] = df[x_columns + [y_column]].apply(pd.to_numeric, errors="coerce").fillna(0)
 
-    coefs, r2 = run_regression(df, x_columns, y_column)
+    coefs, r2, mspr = run_regression(df, x_columns, y_column)
     return {
         "r2": r2,
+        "mspr": mspr,
         "coefficients": coefs.to_dict()
     }

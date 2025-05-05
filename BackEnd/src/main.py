@@ -36,11 +36,13 @@ def main():
 
     df[x_columns + [y_column]] = df[x_columns + [y_column]].apply(pd.to_numeric, errors='coerce').fillna(0)
 
-    coefs, r2 = run_regression(df, x_columns, y_column)
+    coefs, r2, mspr = run_regression(df, x_columns, y_column)
 
-    print("\n Modellens förklaringsgrad (R²):", round(r2, 3))
+    print("\n🧠 Modellens förklaringsgrad (R²):", round(r2, 3))
+    print("📉 Mean Squared Prediction Residual (MSPR):", round(mspr, 4))
     print("📈 Regressionkoefficienter (Elastic Net):")
     print(coefs[coefs != 0].sort_values(key=abs, ascending=False))
+
 
 if __name__ == "__main__":
     main()
