@@ -1,6 +1,6 @@
--Läsa statistiska mått
+-Läsa statistiska mått.
 
 -Fixa så att man kan välja vilka spelare man vill kolla emot något Y man väljer själv, 
 Y= Goals conceded, Goals Scored, xG, XGa...
 
--
+-lägga till playercard i dashboard där man kan se sina spelares per game average stats.
