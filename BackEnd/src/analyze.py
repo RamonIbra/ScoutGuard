@@ -3,7 +3,7 @@ from sklearn.linear_model import ElasticNet
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
 
-def run_regression(df: pd.DataFrame, x_cols: list[str], y_col: str, alpha=0.01, l1_ratio=0.5):
+def run_regression(df: pd.DataFrame, x_cols: list[str], y_col: str, alpha=1, l1_ratio=0.1):
     X = df[x_cols]
     y = df[y_col]
 

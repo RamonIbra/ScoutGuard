@@ -22,7 +22,7 @@ type Props = {
 
 export default function RegressionChart({ stats }: Props) {
     // Filtrerar bort insignifikanta värden
-    const filteredStats = stats.filter((s) => Math.abs(s.weight) >= 0.01);
+    const filteredStats = stats.filter((s) => Math.abs(s.weight) >= 0.001);
   
     return (
       <ResponsiveContainer width="100%" height={400}>
@@ -33,8 +33,8 @@ export default function RegressionChart({ stats }: Props) {
         >
           <XAxis
             type="number"
-            domain={[-1, 1]}
-            tickFormatter={(tick) => tick.toFixed(2)}
+            domain={[-0.5, 0.5]}
+            tickFormatter={(tick) => tick.toFixed(3)}
           />
           <YAxis
             type="category"
@@ -48,7 +48,7 @@ export default function RegressionChart({ stats }: Props) {
             <LabelList
               dataKey="weight"
               position="right"
-              formatter={(val: number) => val.toFixed(2)}
+              formatter={(val: number) => val.toFixed(3)}
             />
             {filteredStats.map((entry, index) => (
               <Cell

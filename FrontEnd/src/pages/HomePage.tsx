@@ -20,7 +20,7 @@ const DashboardPage = () => {
 
       const entries = Object.entries(data.coefficients)
         .map(([name, weight]) => ({ name, weight: Number(weight) }))
-        .filter((entry) => Math.abs(entry.weight) >= 0.01)
+        .filter((entry) => Math.abs(entry.weight) >= 0.001)
         .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
 
       setStats(entries);
