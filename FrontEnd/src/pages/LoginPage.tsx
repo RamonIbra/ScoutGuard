@@ -52,7 +52,7 @@ const LoginPage = () => {
           Logga in
         </button>
 
-        {/* 👇 Flytta hit din länk */}
+        {/* Flytta hit din länk */}
         <p className="text-center mt-4 text-sm">
           Har du inget konto?{" "}
           <a href="/register" className="text-blue-600 hover:underline">

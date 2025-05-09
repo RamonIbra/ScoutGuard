@@ -8,10 +8,13 @@ const DashboardPage = () => {
   const [stats, setStats] = useState<Stat[]>([]);
   const [r2, setR2] = useState<number | null>(null);
   const [mspr, setMspr] = useState<number | null>(null);
+  const [ssr, setSsr] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       const user_id = session?.user?.id ?? "";
 
       const res = await fetch(`http://localhost:8000/regression?user_id=${user_id}`);
@@ -27,6 +30,7 @@ const DashboardPage = () => {
       setStats(entries);
       setR2(data.r2 ?? null);
       setMspr(data.mspr ?? null);
+      setSsr(data.ssr ?? null);
     };
 
     fetchData();
@@ -40,20 +44,18 @@ const DashboardPage = () => {
       </p>
 
       {r2 !== null && (
-        <p className="text-sm text-gray-500">
-          Model explanatory power (R² = {r2.toFixed(3)}): explains about {(r2 * 100).toFixed(1)}% of the variance.
+        <p className="text-sm text-gray-500 mb-1">
+          <strong>R²: {r2.toFixed(3)}</strong> - proportion of variance in goals conceded explained by the model.
         </p>
       )}
-
       {mspr !== null && (
-        <p className="text-sm text-gray-500 mb-4">
-          Mean Squared Prediction Residual (MSPR): {mspr.toFixed(4)}
+        <p className="text-sm text-gray-500 mb-1">
+          <strong>MSPR: {mspr.toFixed(4)}</strong> - average prediction error on unseen data.
         </p>
       )}
-
-      {r2 !== null && mspr !== null && r2 > 0.5 && mspr > 0.2 && (
-        <p className="text-sm text-red-600 mb-6">
-          Warning: High R² but high MSPR may indicate overfitting, the model fits your data well but may not generalize to new matches.
+      {ssr !== null && (
+        <p className="text-sm text-gray-500 mb-4">
+          <strong>SSR: {ssr.toFixed(2)}</strong> - total squared residuals on the training data.
         </p>
       )}
 
@@ -61,6 +63,5 @@ const DashboardPage = () => {
     </div>
   );
 };
-
 
 export default DashboardPage;

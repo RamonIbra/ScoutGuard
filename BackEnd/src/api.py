@@ -18,6 +18,8 @@ def get_regression(user_id: str = ""):
     if not user_id:
         return {
             "r2": 0.25,
+            "mspr": 0.12,
+            "ssr": 83.7,
             "coefficients": {
                 "Tackles": -0.34,
                 "Progressive Passes": -0.28,
@@ -47,9 +49,10 @@ def get_regression(user_id: str = ""):
     x_columns = [col for col in df.columns if col not in exclude_cols]
     df[x_columns + [y_column]] = df[x_columns + [y_column]].apply(pd.to_numeric, errors="coerce").fillna(0)
 
-    coefs, r2, mspr = run_regression(df, x_columns, y_column)
+    coefs, r2, mspr, ssr = run_regression(df, x_columns, y_column)
     return {
         "r2": r2,
         "mspr": mspr,
+        "ssr": ssr,
         "coefficients": coefs.to_dict()
     }
