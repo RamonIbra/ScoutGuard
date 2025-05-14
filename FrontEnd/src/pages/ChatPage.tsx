@@ -1,11 +1,6 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react"; // Import useRef
 import { supabase } from "@/lib/supabaseClient";
 import GroupChatCreator from "@/components/ui/GroupChatCreator";
-
-// Import icons (you might need to install a library like react-icons)
-// Example using react-icons: npm install react-icons
-// import { FaTrash } from 'react-icons/fa';
-
 
 type User = {
   id: string;
@@ -35,7 +30,6 @@ type GroupChat = {
   created_at: string;
   updated_at?: string;
   team_id?: string;
-  owner_id?: string; // Add owner_id to GroupChat type
 };
 
 const ChatPage = () => {
@@ -53,12 +47,10 @@ const ChatPage = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null); // Ref for auto-scrolling
 
-  // --- Removed the useEffect that scrolled on any messages change ---
-  // useEffect(() => {
-  //   messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  // }, [messages]);
-  // --- Scroll will now be triggered manually after adding messages ---
-
+  // Auto-scroll to the latest message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]); // Scroll when messages change
 
   // Effect to fetch initial data (user, teams, chats)
   useEffect(() => {
@@ -117,10 +109,10 @@ const ChatPage = () => {
 
       const groupIds = memberGroups?.map((m) => m.group_chat_id) ?? [];
 
-      // Fetch group chats the user is a member of, including owner_id, ordered by updated_at
+      // Fetch group chats the user is a member of, ordered by updated_at
       const { data: groups, error: groupsError } = await supabase
         .from("group_chats")
-        .select("*, owner_id") // Select owner_id
+        .select("*")
         .in("id", groupIds)
         .order("updated_at", { ascending: false }); // Order by updated_at
 
@@ -199,8 +191,6 @@ const ChatPage = () => {
                }
              }
             setMessages((prev) => [...prev, message]);
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); // --- Added scroll here ---
-
           } else if (message.sender_id === myUserId && (selectedConversation || selectedGroup) &&
                      ((selectedConversation && message.conversation_id === selectedConversation.id) ||
                       (selectedGroup && message.group_chat_id === selectedGroup.id))) {
@@ -233,6 +223,8 @@ const ChatPage = () => {
                    return prevGroups;
                });
            }
+
+
         }
       )
       .subscribe();
@@ -281,9 +273,6 @@ const ChatPage = () => {
          console.error("Error fetching messages:", error);
       } else {
          setMessages(data ?? []);
-         // Optional: Scroll to the bottom *after* initial messages are loaded
-         // Remove this line if you prefer no initial scroll
-         messagesEndRef.current?.scrollIntoView({ behavior: "instant" }); // Use "instant" for no smooth animation on load
       }
     };
 
@@ -315,9 +304,6 @@ const ChatPage = () => {
       // Add the message to state immediately for optimistic UI
       setMessages((prev) => [...prev, data]);
       setNewMessage("");
-
-      // --- Added scroll here after sending message ---
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
       // Manually update the updated_at for the current chat in the sidebar state
       // and re-sort the list to bring it to the top. This is a controlled update.
@@ -405,69 +391,6 @@ const ChatPage = () => {
   };
 
 
-  // --- New function to handle group deletion ---
-  const handleDeleteGroup = async (groupId: string) => {
-      if (!myUserId) return;
-
-      // Optional: Get group details to check ownership before confirming
-      const groupToDelete = groupChats.find(group => group.id === groupId);
-      if (!groupToDelete || groupToDelete.owner_id !== myUserId) {
-          alert("Du har inte behörighet att radera denna gruppchatt.");
-          return; // Prevent deletion if not owner
-      }
-
-
-      const confirmed = confirm(`Är du säker på att du vill radera gruppchatten "${groupToDelete.name}"? Detta kan inte ångras.`);
-      if (!confirmed) {
-          return;
-      }
-
-      try {
-          // If not using ON DELETE CASCADE, uncomment these:
-          // // 1. Delete messages in the group
-          // const { error: messagesError } = await supabase
-          //     .from('messages')
-          //     .delete()
-          //     .eq('group_chat_id', groupId);
-
-          // if (messagesError) throw messagesError;
-
-          // // 2. Delete group members
-          // const { error: membersError } = await supabase
-          //     .from('group_chat_members')
-          //     .delete()
-          //     .eq('group_chat_id', groupId);
-
-          // if (membersError) throw membersError;
-
-
-          // 3. Delete the group chat itself (this will cascade if set up)
-          const { error: groupError } = await supabase
-              .from('group_chats')
-              .delete()
-              .eq('id', groupId);
-
-          if (groupError) throw groupError;
-
-          // Update state to remove the deleted group
-          setGroupChats(prevGroups => prevGroups.filter(group => group.id !== groupId));
-
-          // If the deleted group was currently selected, clear the selection
-          if (selectedGroup?.id === groupId) {
-              setSelectedGroup(null);
-              setMessages([]); // Clear messages for the deleted chat
-          }
-
-          alert("Gruppchatten raderades framgångsrikt.");
-
-      } catch (error: any) {
-          console.error("Fel vid radering av grupp:", error);
-          alert(`Kunde inte radera gruppchatten. ${error.message || ''}`);
-      }
-  };
-  // --- End new function ---
-
-
   return (
     // Main container for the chat layout
     <div className="flex h-screen bg-gray-100 text-gray-800"> {/* Use h-screen for full height, add a light background */}
@@ -553,38 +476,19 @@ const ChatPage = () => {
                         groupChats.map((group) => (
                             <div
                                 key={group.id}
-                                className={`cursor-pointer py-3 px-4 rounded-lg transition duration-200 ease-in-out flex items-center justify-between ${ // Use flex to space name and button
+                                onClick={() => {
+                                    setSelectedGroup(group);
+                                    setSelectedConversation(null);
+                                }}
+                                className={`cursor-pointer py-3 px-4 rounded-lg transition duration-200 ease-in-out ${
                                     selectedGroup?.id === group.id ? 'bg-purple-100 border-l-4 border-purple-500' : 'hover:bg-gray-100' // Active state with border
                                 }`}
                             >
-                                <div
-                                    className="flex-1 mr-2" // Allow name to take space, add margin
-                                    onClick={() => {
-                                        setSelectedGroup(group);
-                                        setSelectedConversation(null);
-                                    }}
-                                >
-                                    <div className="font-medium text-gray-900">{group.name}</div> {/* Group name style */}
-                                     {/* Display updated_at for groups if available, otherwise created_at */}
-                                     <div className="text-xs text-gray-500">
-                                        Senast aktiv: {new Date(group.updated_at || group.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {/* Time format */}
-                                     </div>
-                                </div>
-                                {/* Delete button - visible only if user is the owner */}
-                                {myUserId === group.owner_id && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation(); // Prevent the div's onClick from firing
-                                            handleDeleteGroup(group.id);
-                                        }}
-                                        className="text-red-500 hover:text-red-700 focus:outline-none p-1 -mr-1 rounded-full hover:bg-red-100" // Added padding and hover background
-                                        title="Radera gruppchatt"
-                                    >
-                                        {/* Replace with an actual icon if using a library */}
-                                        {/* <FaTrash /> */}
-                                        🗑️ {/* Using a simple emoji for demonstration */}
-                                    </button>
-                                )}
+                                <div className="font-medium text-gray-900">{group.name}</div> {/* Group name style */}
+                                 {/* Display updated_at for groups if available, otherwise created_at */}
+                                 <div className="text-xs text-gray-500">
+                                    Senast aktiv: {new Date(group.updated_at || group.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {/* Time format */}
+                                 </div>
                             </div>
                         ))
                     ) : (
@@ -611,7 +515,6 @@ const ChatPage = () => {
 
 
         {/* Messages Area */}
-        {/* Ensure this div has flex-1 and overflow-y-auto to be the scrollable part */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4"> {/* Added more padding and space between messages */}
           {messages.map((msg) => (
             <div
