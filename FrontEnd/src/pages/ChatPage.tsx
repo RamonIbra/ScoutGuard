@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import GroupChatCreator from "@/components/ui/GroupChatCreator";
+
+// Import icons (you might need to install a library like react-icons)
+// Example using react-icons: npm install react-icons
+// import { FaTrash } from 'react-icons/fa';
+
 
 type User = {
   id: string;
   name: string;
+  team_id?: string;
 };
 
 type Message = {
@@ -27,10 +33,14 @@ type GroupChat = {
   id: string;
   name: string;
   created_at: string;
+  updated_at?: string;
+  team_id?: string;
+  owner_id?: string; // Add owner_id to GroupChat type
 };
 
 const ChatPage = () => {
   const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [myTeamId, setMyTeamId] = useState<string | null>(null);
   const [teammates, setTeammates] = useState<User[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [groupChats, setGroupChats] = useState<GroupChat[]>([]);
@@ -39,68 +49,125 @@ const ChatPage = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [userMap, setUserMap] = useState<Record<string, string>>({});
+  const [loadingChats, setLoadingChats] = useState(true);
 
+  const messagesEndRef = useRef<HTMLDivElement>(null); // Ref for auto-scrolling
+
+  // --- Removed the useEffect that scrolled on any messages change ---
+  // useEffect(() => {
+  //   messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // }, [messages]);
+  // --- Scroll will now be triggered manually after adding messages ---
+
+
+  // Effect to fetch initial data (user, teams, chats)
   useEffect(() => {
     const fetchData = async () => {
-      const { data: sessionData } = await supabase.auth.getUser();
+      setLoadingChats(true);
+      const { data: sessionData, error: sessionError } = await supabase.auth.getUser();
       const userId = sessionData.user?.id;
-      if (!userId) return;
+      if (!userId) {
+        setLoadingChats(false);
+        return;
+      }
       setMyUserId(userId);
 
-      const { data: user } = await supabase
+      const { data: user, error: userError } = await supabase
         .from("users")
         .select("team_id")
         .eq("id", userId)
         .single();
-      const teamId = user?.team_id;
 
-      const { data: teammatesData } = await supabase
+      if (userError) {
+        console.error("Error fetching user team:", userError);
+        setLoadingChats(false);
+        return;
+      }
+
+      const teamId = user?.team_id;
+      setMyTeamId(teamId); // Set the user's team ID state
+
+      // Fetch teammates
+      const { data: teammatesData, error: teammatesError } = await supabase
         .from("users")
         .select("id, name")
         .eq("team_id", teamId)
         .neq("id", userId);
 
-      const { data: convData } = await supabase
+      if (teammatesError) console.error("Error fetching teammates:", teammatesError);
+
+
+      // Fetch conversations
+      const { data: convData, error: convError } = await supabase
         .from("conversations")
         .select("*")
         .or(`participant_a.eq.${userId},participant_b.eq.${userId}`)
         .order("updated_at", { ascending: false });
 
-      const { data: memberGroups } = await supabase
+      if (convError) console.error("Error fetching conversations:", convError);
+
+
+      // Fetch group chat memberships
+      const { data: memberGroups, error: memberGroupsError } = await supabase
         .from("group_chat_members")
         .select("group_chat_id")
         .eq("user_id", userId);
 
+      if (memberGroupsError) console.error("Error fetching group memberships:", memberGroupsError);
+
       const groupIds = memberGroups?.map((m) => m.group_chat_id) ?? [];
 
-      const { data: groups } = await supabase
+      // Fetch group chats the user is a member of, including owner_id, ordered by updated_at
+      const { data: groups, error: groupsError } = await supabase
         .from("group_chats")
-        .select("*")
+        .select("*, owner_id") // Select owner_id
         .in("id", groupIds)
-        .order("created_at", { ascending: false });
+        .order("updated_at", { ascending: false }); // Order by updated_at
+
+      if (groupsError) console.error("Error fetching groups:", groupsError);
+
 
       setGroupChats(groups ?? []);
       setConversations(convData ?? []);
 
-      const allUserIds = convData?.flatMap((c) => [c.participant_a, c.participant_b]) ?? [];
-      const uniqueIds = [...new Set(allUserIds.filter((id) => id !== userId))];
-      const { data: usersInChats } = await supabase
+      // Build user map for names
+      const allUserIds = [
+        ...(convData?.flatMap((c) => [c.participant_a, c.participant_b]) ?? []),
+        ...(teammatesData?.map(t => t.id) ?? []), // Include all fetched teammates
+         userId // Include the current user
+      ].filter(Boolean); // Filter out any null/undefined
+
+
+      const uniqueIds = [...new Set(allUserIds)];
+      const { data: allUsersData, error: allUsersError } = await supabase
         .from("users")
         .select("id, name")
         .in("id", uniqueIds);
 
-      const allUsers = [...(teammatesData ?? []), ...(usersInChats ?? [])];
-      const map = Object.fromEntries(allUsers.map((u) => [u.id, u.name]));
+      if (allUsersError) console.error("Error fetching users for map:", allUsersError);
+
+      const map = Object.fromEntries((allUsersData ?? []).map((u) => [u.id, u.name]));
       setUserMap(map);
 
+
+      // Filter teammates who are not already in a conversation
       const chattedWith = convData?.flatMap((c) =>
         [c.participant_a, c.participant_b].filter((id) => id !== userId)
       ) ?? [];
       const filteredTeammates = teammatesData?.filter((mate) => !chattedWith.includes(mate.id)) ?? [];
       setTeammates(filteredTeammates);
+
+      setLoadingChats(false);
     };
 
     fetchData();
+
+  }, [myUserId]);
+
+
+  // Effect to set up real-time subscription for messages
+  useEffect(() => {
+     if (!myUserId) return;
 
     const sub = supabase
       .channel("messages")
@@ -109,16 +176,63 @@ const ChatPage = () => {
         { event: "INSERT", schema: "public", table: "messages" },
         async (payload) => {
           const message = payload.new as Message;
-          if (!myUserId) return;
+
+          // Check if the new message belongs to the currently selected chat
+          // We are relying on the local state update for messages sent by the current user,
+          // so we only add messages from others here.
           if (
             message.sender_id !== myUserId &&
             (
-              message.conversation_id === selectedConversation?.id ||
-              message.group_chat_id === selectedGroup?.id
+              (selectedConversation && message.conversation_id === selectedConversation.id) ||
+              (selectedGroup && message.group_chat_id === selectedGroup.id)
             )
           ) {
+             // Fetch sender name if not already in userMap
+             if (!userMap[message.sender_id]) {
+               const { data: sender, error } = await supabase
+                 .from('users')
+                 .select('id, name')
+                 .eq('id', message.sender_id)
+                 .single();
+               if (!error && sender) {
+                 setUserMap(prev => ({ ...prev, [sender.id]: sender.name }));
+               }
+             }
             setMessages((prev) => [...prev, message]);
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); // --- Added scroll here ---
+
+          } else if (message.sender_id === myUserId && (selectedConversation || selectedGroup) &&
+                     ((selectedConversation && message.conversation_id === selectedConversation.id) ||
+                      (selectedGroup && message.group_chat_id === selectedGroup.id))) {
+             // This case handles messages sent by the current user.
+             // We rely on the optimistic update in handleSendMessage.
+             // No need to add the message again from the subscription.
           }
+
+           // Optional: When a message arrives (from self or others) for *any* chat the user is in,
+           // update the list item's updated_at in state and re-sort to bring it to the top visually.
+           // This happens outside the currently selected chat check to keep the sidebar updated.
+           if (message.conversation_id && conversations.some(conv => conv.id === message.conversation_id)) {
+               setConversations(prevConv => {
+                  const convIndex = prevConv.findIndex(conv => conv.id === message.conversation_id);
+                  if (convIndex > -1) {
+                      const updatedConv = [...prevConv];
+                      updatedConv[convIndex] = { ...updatedConv[convIndex], updated_at: message.created_at };
+                      return updatedConv.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                  }
+                  return prevConv;
+               });
+           } else if (message.group_chat_id && groupChats.some(group => group.id === message.group_chat_id)) {
+               setGroupChats(prevGroups => {
+                   const groupIndex = prevGroups.findIndex(group => group.id === message.group_chat_id);
+                   if (groupIndex > -1) {
+                       const updatedGroups = [...prevGroups];
+                       updatedGroups[groupIndex] = { ...updatedGroups[groupIndex], updated_at: message.created_at };
+                       return updatedGroups.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+                   }
+                   return prevGroups;
+               });
+           }
         }
       )
       .subscribe();
@@ -126,62 +240,128 @@ const ChatPage = () => {
     return () => {
       supabase.removeChannel(sub);
     };
-  }, [selectedConversation, selectedGroup, myUserId]);
+     // Subscription depends on myUserId, selectedConversation, selectedGroup, userMap, conversations, groupChats
+  }, [myUserId, selectedConversation, selectedGroup, userMap, conversations, groupChats]);
 
+
+  // Effect to fetch messages for the selected chat
   useEffect(() => {
     const fetchMessages = async () => {
-      if (!myUserId) return;
+      if (!myUserId || (!selectedConversation && !selectedGroup)) {
+        setMessages([]); // Clear messages if no chat is selected or user is null
+        return;
+      }
+
+      // Clear messages before fetching new ones
+      setMessages([]);
+
+      let data = null;
+      let error = null;
 
       if (selectedConversation) {
-        const { data } = await supabase
+        const result = await supabase
           .from("messages")
           .select("*")
           .eq("conversation_id", selectedConversation.id)
           .order("created_at", { ascending: true });
-        setMessages(data ?? []);
+          data = result.data;
+          error = result.error;
+
       } else if (selectedGroup) {
-        const { data } = await supabase
+        const result = await supabase
           .from("messages")
           .select("*")
           .eq("group_chat_id", selectedGroup.id)
           .order("created_at", { ascending: true });
-        setMessages(data ?? []);
+          data = result.data;
+          error = result.error;
+      }
+
+      if (error) {
+         console.error("Error fetching messages:", error);
+      } else {
+         setMessages(data ?? []);
+         // Optional: Scroll to the bottom *after* initial messages are loaded
+         // Remove this line if you prefer no initial scroll
+         messagesEndRef.current?.scrollIntoView({ behavior: "instant" }); // Use "instant" for no smooth animation on load
       }
     };
 
     fetchMessages();
+     // Fetching messages depends on which chat is selected and the user ID
   }, [selectedConversation, selectedGroup, myUserId]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!myUserId || !newMessage) return;
+    if (!myUserId || !newMessage.trim()) return;
 
-    const payload: any = {
+    const payload: Omit<Message, 'id' | 'created_at'> = {
       sender_id: myUserId,
-      content: newMessage,
+      content: newMessage.trim(),
     };
 
-    if (selectedConversation) payload.conversation_id = selectedConversation.id;
-    else if (selectedGroup) payload.group_chat_id = selectedGroup.id;
-    else return;
+    if (selectedConversation) {
+      payload.conversation_id = selectedConversation.id;
+    } else if (selectedGroup) {
+      payload.group_chat_id = selectedGroup.id;
+    } else {
+      return;
+    }
 
     const { data, error } = await supabase.from("messages").insert(payload).select().single();
-    if (!error && data) {
+    if (error) {
+       console.error("Error sending message:", error);
+    } else if (data) {
+      // Add the message to state immediately for optimistic UI
       setMessages((prev) => [...prev, data]);
       setNewMessage("");
+
+      // --- Added scroll here after sending message ---
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+
+      // Manually update the updated_at for the current chat in the sidebar state
+      // and re-sort the list to bring it to the top. This is a controlled update.
+      if (selectedConversation) {
+         setConversations(prevConv => {
+            const convIndex = prevConv.findIndex(conv => conv.id === selectedConversation.id);
+            if (convIndex > -1) {
+              const updatedConv = [...prevConv];
+              updatedConv[convIndex] = { ...updatedConv[convIndex], updated_at: data.created_at };
+              // Sorting here ensures the list is updated visually
+              return updatedConv.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+            }
+            return prevConv;
+         });
+      } else if (selectedGroup) {
+         setGroupChats(prevGroups => {
+           const groupIndex = prevGroups.findIndex(group => group.id === selectedGroup.id);
+           if (groupIndex > -1) {
+             const updatedGroups = [...prevGroups];
+             updatedGroups[groupIndex] = { ...updatedGroups[groupIndex], updated_at: data.created_at };
+              // Sorting here ensures the list is updated visually
+             return updatedGroups.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+           }
+           return prevGroups;
+         });
+      }
     }
   };
 
   const startConversation = async (receiverId: string) => {
     if (!myUserId) return;
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("conversations")
       .select("*")
       .or(
         `and(participant_a.eq.${myUserId},participant_b.eq.${receiverId}),and(participant_a.eq.${receiverId},participant_b.eq.${myUserId})`
       )
       .limit(1);
+
+    if (existingError) {
+       console.error("Error checking existing conversation:", existingError);
+       return;
+    }
 
     if (existing && existing.length > 0) {
       setSelectedConversation(existing[0]);
@@ -193,101 +373,287 @@ const ChatPage = () => {
         .select()
         .single();
 
-      if (!error) {
-        setConversations((prev) => [data, ...prev]);
+      if (error) {
+        console.error("Error creating conversation:", error);
+      } else if (data) {
+        // Add the new conversation to the state and sort
+        setConversations((prev) => {
+            const updatedConv = [data, ...prev];
+            return updatedConv.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        });
         setSelectedConversation(data);
         setSelectedGroup(null);
+        // Remove the user from the "Start new chat" list if successful
+        setTeammates(prev => prev.filter(mate => mate.id !== receiverId));
       }
     }
   };
 
+
+  // Callback function for GroupChatCreator
+  const handleGroupCreated = (newGroup: GroupChat) => {
+    // Add the new group to the groupChats state and sort
+    setGroupChats(prevGroups => {
+      // Add the new group, use its created_at or the current time as updated_at initially for sorting
+      const groupWithUpdated = { ...newGroup, updated_at: newGroup.created_at || new Date().toISOString() };
+      const updatedGroups = [groupWithUpdated, ...prevGroups];
+       return updatedGroups.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+    });
+    // Select the newly created group
+    setSelectedGroup(newGroup);
+    setSelectedConversation(null);
+  };
+
+
+  // --- New function to handle group deletion ---
+  const handleDeleteGroup = async (groupId: string) => {
+      if (!myUserId) return;
+
+      // Optional: Get group details to check ownership before confirming
+      const groupToDelete = groupChats.find(group => group.id === groupId);
+      if (!groupToDelete || groupToDelete.owner_id !== myUserId) {
+          alert("Du har inte behörighet att radera denna gruppchatt.");
+          return; // Prevent deletion if not owner
+      }
+
+
+      const confirmed = confirm(`Är du säker på att du vill radera gruppchatten "${groupToDelete.name}"? Detta kan inte ångras.`);
+      if (!confirmed) {
+          return;
+      }
+
+      try {
+          // If not using ON DELETE CASCADE, uncomment these:
+          // // 1. Delete messages in the group
+          // const { error: messagesError } = await supabase
+          //     .from('messages')
+          //     .delete()
+          //     .eq('group_chat_id', groupId);
+
+          // if (messagesError) throw messagesError;
+
+          // // 2. Delete group members
+          // const { error: membersError } = await supabase
+          //     .from('group_chat_members')
+          //     .delete()
+          //     .eq('group_chat_id', groupId);
+
+          // if (membersError) throw membersError;
+
+
+          // 3. Delete the group chat itself (this will cascade if set up)
+          const { error: groupError } = await supabase
+              .from('group_chats')
+              .delete()
+              .eq('id', groupId);
+
+          if (groupError) throw groupError;
+
+          // Update state to remove the deleted group
+          setGroupChats(prevGroups => prevGroups.filter(group => group.id !== groupId));
+
+          // If the deleted group was currently selected, clear the selection
+          if (selectedGroup?.id === groupId) {
+              setSelectedGroup(null);
+              setMessages([]); // Clear messages for the deleted chat
+          }
+
+          alert("Gruppchatten raderades framgångsrikt.");
+
+      } catch (error: any) {
+          console.error("Fel vid radering av grupp:", error);
+          alert(`Kunde inte radera gruppchatten. ${error.message || ''}`);
+      }
+  };
+  // --- End new function ---
+
+
   return (
-    <div className="flex h-full">
-      <aside className="w-1/3 border-r p-4 overflow-y-auto">
-        <h2 className="text-xl font-bold mb-4">Dina chattar</h2>
+    // Main container for the chat layout
+    <div className="flex h-screen bg-gray-100 text-gray-800"> {/* Use h-screen for full height, add a light background */}
 
-        {conversations.map((conv) => {
-          const otherId = conv.participant_a === myUserId ? conv.participant_b : conv.participant_a;
-          const otherName = userMap[otherId] ?? "Okänd";
+      {/* Sidebar */}
+      <aside className="w-80 flex-shrink-0 border-r border-gray-300 bg-white p-6 overflow-y-auto"> {/* Adjusted width, border color, background, padding */}
+        <h2 className="text-2xl font-bold mb-6 text-gray-900">Dina chattar</h2> {/* Larger heading, more bottom margin, darker text */}
 
-          return (
-            <div
-              key={conv.id}
-              onClick={() => {
-                setSelectedConversation(conv);
-                setSelectedGroup(null);
-              }}
-              className="cursor-pointer hover:bg-gray-200 p-2 rounded"
-            >
-              <div>{otherName}</div>
-              <div className="text-xs text-gray-500">
-                {new Date(conv.updated_at).toLocaleTimeString()}
+        {loadingChats ? (
+          <p className="text-gray-600">Laddar chattar...</p>
+        ) : (
+          <>
+            {/* Conversations List */}
+            <div className="mb-6"> {/* Add bottom margin to this section */}
+                <h3 className="text-lg font-semibold mb-3 text-gray-800">Privatchattar</h3> {/* Section heading */}
+                <div className="divide-y divide-gray-200"> {/* Add dividers between items */}
+                    {conversations.length > 0 ? (
+                        conversations.map((conv) => {
+                            const otherId = conv.participant_a === myUserId ? conv.participant_b : conv.participant_a;
+                            const otherName = userMap[otherId] ?? "Okänd";
+
+                            return (
+                                <div
+                                    key={conv.id}
+                                    onClick={() => {
+                                        setSelectedConversation(conv);
+                                        setSelectedGroup(null);
+                                    }}
+                                    className={`cursor-pointer py-3 px-4 rounded-lg transition duration-200 ease-in-out ${
+                                        selectedConversation?.id === conv.id ? 'bg-blue-100 border-l-4 border-blue-500' : 'hover:bg-gray-100' // Active state with border
+                                    }`}
+                                >
+                                    <div className="font-medium text-gray-900">{otherName}</div> {/* User name style */}
+                                    <div className="text-xs text-gray-500">
+                                        Senast aktiv: {new Date(conv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {/* Time format */}
+                                    </div>
+                                </div>
+                            );
+                        })
+                    ) : (
+                        <p className="text-gray-600 text-sm">Inga privatchattar ännu.</p>
+                    )}
+                </div>
+            </div>
+
+            {/* Start New Chat Section */}
+            <div className="mb-6"> {/* Add bottom margin */}
+              <h3 className="text-lg font-semibold mb-3 text-gray-800">Starta ny chatt</h3>
+              <div className="divide-y divide-gray-200">
+                {teammates.length > 0 ? (
+                  teammates.map((mate) => (
+                    <div
+                      key={mate.id}
+                      onClick={() => startConversation(mate.id)}
+                      className="cursor-pointer py-2 px-4 rounded-lg text-sm text-gray-700 hover:bg-green-50 transition duration-200 ease-in-out" // Style for starting new chat
+                    >
+                      {mate.name || "Okänd spelare"}
+                    </div>
+                  ))
+                ) : (
+                   <p className="text-gray-600 text-sm">Inga teammedlemmar att chatta med.</p>
+                )}
               </div>
             </div>
-          );
-        })}
 
-        <hr className="my-4" />
+            <hr className="my-6 border-gray-300" /> {/* Styled horizontal rule */}
 
-        <h3 className="text-md font-semibold mb-2">Starta ny chatt</h3>
-        {teammates.map((mate) => (
-          <div
-            key={mate.id}
-            onClick={() => startConversation(mate.id)}
-            className="cursor-pointer hover:bg-green-100 p-2 rounded text-sm"
-          >
-            {mate.name || "Okänd spelare"}
-          </div>
-        ))}
+            {/* Group Chat Creator Section */}
+            {myUserId && myTeamId && <GroupChatCreator currentUserId={myUserId} teamId={myTeamId} onGroupCreated={handleGroupCreated} />}
+             {myUserId && !myTeamId && (
+                <p className="text-red-500 text-sm mt-4">Kan inte skapa gruppchatt utan team ID.</p>
+             )}
 
-        <hr className="my-4" />
 
-        <GroupChatCreator currentUserId={myUserId!} />
+            <hr className="my-6 border-gray-300" /> {/* Styled horizontal rule */}
 
-        <h3 className="text-md font-semibold mt-6 mb-2">Gruppchattar</h3>
-        {groupChats.map((group) => (
-          <div
-            key={group.id}
-            onClick={() => {
-              setSelectedGroup(group);
-              setSelectedConversation(null);
-            }}
-            className="cursor-pointer hover:bg-blue-100 p-2 rounded text-sm"
-          >
-            {group.name}
-          </div>
-        ))}
+
+            {/* Group Chats List */}
+            <div className="mb-6"> {/* Add bottom margin */}
+                <h3 className="text-lg font-semibold mb-3 text-gray-800">Gruppchattar</h3>
+                <div className="divide-y divide-gray-200"> {/* Add dividers between items */}
+                    {groupChats.length > 0 ? (
+                        groupChats.map((group) => (
+                            <div
+                                key={group.id}
+                                className={`cursor-pointer py-3 px-4 rounded-lg transition duration-200 ease-in-out flex items-center justify-between ${ // Use flex to space name and button
+                                    selectedGroup?.id === group.id ? 'bg-purple-100 border-l-4 border-purple-500' : 'hover:bg-gray-100' // Active state with border
+                                }`}
+                            >
+                                <div
+                                    className="flex-1 mr-2" // Allow name to take space, add margin
+                                    onClick={() => {
+                                        setSelectedGroup(group);
+                                        setSelectedConversation(null);
+                                    }}
+                                >
+                                    <div className="font-medium text-gray-900">{group.name}</div> {/* Group name style */}
+                                     {/* Display updated_at for groups if available, otherwise created_at */}
+                                     <div className="text-xs text-gray-500">
+                                        Senast aktiv: {new Date(group.updated_at || group.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {/* Time format */}
+                                     </div>
+                                </div>
+                                {/* Delete button - visible only if user is the owner */}
+                                {myUserId === group.owner_id && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation(); // Prevent the div's onClick from firing
+                                            handleDeleteGroup(group.id);
+                                        }}
+                                        className="text-red-500 hover:text-red-700 focus:outline-none p-1 -mr-1 rounded-full hover:bg-red-100" // Added padding and hover background
+                                        title="Radera gruppchatt"
+                                    >
+                                        {/* Replace with an actual icon if using a library */}
+                                        {/* <FaTrash /> */}
+                                        🗑️ {/* Using a simple emoji for demonstration */}
+                                    </button>
+                                )}
+                            </div>
+                        ))
+                    ) : (
+                         <p className="text-gray-600 text-sm">Inga gruppchattar ännu.</p>
+                    )}
+                </div>
+            </div>
+          </>
+        )}
       </aside>
 
-      <main className="flex-1 p-4 flex flex-col">
-        <div className="flex-1 overflow-y-auto space-y-2">
+      {/* Main Chat Window */}
+      <main className="flex-1 flex flex-col bg-gray-50"> {/* Flex column layout, light background */}
+        {/* Chat Header */}
+        <div className="bg-white border-b border-gray-300 p-4 shadow-sm"> {/* Header styling */}
+            <h2 className="text-xl font-bold text-gray-900">
+                {selectedConversation ?
+                   (userMap[selectedConversation.participant_a === myUserId ? selectedConversation.participant_b : selectedConversation.participant_a] ?? "Okänd Användare")
+                   : selectedGroup ?
+                   selectedGroup.name
+                   : "Välj en chatt att starta"} {/* Display current chat name */}
+            </h2>
+        </div>
+
+
+        {/* Messages Area */}
+        {/* Ensure this div has flex-1 and overflow-y-auto to be the scrollable part */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4"> {/* Added more padding and space between messages */}
           {messages.map((msg) => (
             <div
               key={msg.id}
-              className={`p-2 rounded max-w-md ${
-                msg.sender_id === myUserId ? "bg-green-200 ml-auto" : "bg-white"
-              }`}
+              className={`flex items-end ${msg.sender_id === myUserId ? "justify-end" : "justify-start"}`} // Use flex to position bubbles
             >
-              {msg.content}
-              <div className="text-xs text-gray-500">
-                {new Date(msg.created_at).toLocaleTimeString()}
-              </div>
+                <div className={`p-3 rounded-lg max-w-xs lg:max-w-md break-words ${ // Message bubble styling, break-words for long messages
+                    msg.sender_id === myUserId
+                        ? "bg-green-500 text-white rounded-br-none" // Sender's bubble
+                        : "bg-gray-200 text-gray-800 rounded-bl-none" // Other users' bubbles
+                }`}>
+                   {/* Display sender name if it's a group chat message and not sent by the current user */}
+                   {msg.group_chat_id && msg.sender_id !== myUserId && (
+                       <div className="font-semibold text-sm mb-1 text-gray-700">
+                           {userMap[msg.sender_id] ?? "Okänd"}
+                       </div>
+                   )}
+                  {msg.content}
+                   <div className="text-xs mt-1 opacity-80 text-right"> {/* Timestamp style */}
+                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
             </div>
           ))}
+           <div ref={messagesEndRef} /> {/* Empty div for scrolling */}
         </div>
 
+        {/* Message Input Area */}
         {(selectedConversation || selectedGroup) && (
-          <form onSubmit={handleSendMessage} className="mt-4 flex">
+          <form onSubmit={handleSendMessage} className="p-6 bg-white border-t border-gray-300 flex items-center gap-3"> {/* Input form styling */}
             <input
               type="text"
-              className="flex-1 border rounded p-2"
+              className="flex-1 border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500" // Input field styling
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               placeholder="Skriv ett meddelande..."
+              disabled={!myUserId}
             />
             <button
               type="submit"
-              className="ml-2 bg-green-600 text-white px-4 py-2 rounded"
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold shadow hover:bg-blue-700 transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" // Button styling
+              disabled={!myUserId || !newMessage.trim()}
             >
               Skicka
             </button>
