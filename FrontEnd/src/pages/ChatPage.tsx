@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import GroupChatCreator from "@/components/ui/GroupChatCreator";
 
 type User = {
   id: string;
@@ -11,7 +12,8 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
-  conversation_id: string;
+  conversation_id?: string;
+  group_chat_id?: string;
 };
 
 type Conversation = {
@@ -21,12 +23,19 @@ type Conversation = {
   updated_at: string;
 };
 
+type GroupChat = {
+  id: string;
+  name: string;
+  created_at: string;
+};
+
 const ChatPage = () => {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [teammates, setTeammates] = useState<User[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversation, setSelectedConversation] =
-    useState<Conversation | null>(null);
+  const [groupChats, setGroupChats] = useState<GroupChat[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<GroupChat | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [userMap, setUserMap] = useState<Record<string, string>>({});
@@ -57,10 +66,23 @@ const ChatPage = () => {
         .or(`participant_a.eq.${userId},participant_b.eq.${userId}`)
         .order("updated_at", { ascending: false });
 
-      setConversations(convData || []);
+      const { data: memberGroups } = await supabase
+        .from("group_chat_members")
+        .select("group_chat_id")
+        .eq("user_id", userId);
 
-      const allUserIds =
-        convData?.flatMap((c) => [c.participant_a, c.participant_b]) ?? [];
+      const groupIds = memberGroups?.map((m) => m.group_chat_id) ?? [];
+
+      const { data: groups } = await supabase
+        .from("group_chats")
+        .select("*")
+        .in("id", groupIds)
+        .order("created_at", { ascending: false });
+
+      setGroupChats(groups ?? []);
+      setConversations(convData ?? []);
+
+      const allUserIds = convData?.flatMap((c) => [c.participant_a, c.participant_b]) ?? [];
       const uniqueIds = [...new Set(allUserIds.filter((id) => id !== userId))];
       const { data: usersInChats } = await supabase
         .from("users")
@@ -71,12 +93,10 @@ const ChatPage = () => {
       const map = Object.fromEntries(allUsers.map((u) => [u.id, u.name]));
       setUserMap(map);
 
-      const chattedWith =
-        convData?.flatMap((c) =>
-          [c.participant_a, c.participant_b].filter((id) => id !== userId)
-        ) ?? [];
-      const filteredTeammates =
-        teammatesData?.filter((mate) => !chattedWith.includes(mate.id)) ?? [];
+      const chattedWith = convData?.flatMap((c) =>
+        [c.participant_a, c.participant_b].filter((id) => id !== userId)
+      ) ?? [];
+      const filteredTeammates = teammatesData?.filter((mate) => !chattedWith.includes(mate.id)) ?? [];
       setTeammates(filteredTeammates);
     };
 
@@ -89,11 +109,13 @@ const ChatPage = () => {
         { event: "INSERT", schema: "public", table: "messages" },
         async (payload) => {
           const message = payload.new as Message;
-          if (!myUserId || !message.conversation_id) return;
-
+          if (!myUserId) return;
           if (
             message.sender_id !== myUserId &&
-            selectedConversation?.id === message.conversation_id
+            (
+              message.conversation_id === selectedConversation?.id ||
+              message.group_chat_id === selectedGroup?.id
+            )
           ) {
             setMessages((prev) => [...prev, message]);
           }
@@ -104,40 +126,48 @@ const ChatPage = () => {
     return () => {
       supabase.removeChannel(sub);
     };
-  }, [selectedConversation, myUserId]);
+  }, [selectedConversation, selectedGroup, myUserId]);
 
   useEffect(() => {
     const fetchMessages = async () => {
-      if (!selectedConversation || !myUserId) return;
+      if (!myUserId) return;
 
-      const { data: allMessages } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", selectedConversation.id)
-        .order("created_at", { ascending: true });
-
-      setMessages(allMessages || []);
+      if (selectedConversation) {
+        const { data } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", selectedConversation.id)
+          .order("created_at", { ascending: true });
+        setMessages(data ?? []);
+      } else if (selectedGroup) {
+        const { data } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("group_chat_id", selectedGroup.id)
+          .order("created_at", { ascending: true });
+        setMessages(data ?? []);
+      }
     };
 
     fetchMessages();
-  }, [selectedConversation, myUserId]);
+  }, [selectedConversation, selectedGroup, myUserId]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!myUserId || !newMessage || !selectedConversation) return;
+    if (!myUserId || !newMessage) return;
 
-    const { data: newMessageData, error } = await supabase
-      .from("messages")
-      .insert({
-        conversation_id: selectedConversation.id,
-        sender_id: myUserId,
-        content: newMessage,
-      })
-      .select()
-      .single();
+    const payload: any = {
+      sender_id: myUserId,
+      content: newMessage,
+    };
 
-    if (!error && newMessageData) {
-      setMessages((prev) => [...prev, newMessageData]);
+    if (selectedConversation) payload.conversation_id = selectedConversation.id;
+    else if (selectedGroup) payload.group_chat_id = selectedGroup.id;
+    else return;
+
+    const { data, error } = await supabase.from("messages").insert(payload).select().single();
+    if (!error && data) {
+      setMessages((prev) => [...prev, data]);
       setNewMessage("");
     }
   };
@@ -155,6 +185,7 @@ const ChatPage = () => {
 
     if (existing && existing.length > 0) {
       setSelectedConversation(existing[0]);
+      setSelectedGroup(null);
     } else {
       const { data, error } = await supabase
         .from("conversations")
@@ -165,6 +196,7 @@ const ChatPage = () => {
       if (!error) {
         setConversations((prev) => [data, ...prev]);
         setSelectedConversation(data);
+        setSelectedGroup(null);
       }
     }
   };
@@ -173,17 +205,18 @@ const ChatPage = () => {
     <div className="flex h-full">
       <aside className="w-1/3 border-r p-4 overflow-y-auto">
         <h2 className="text-xl font-bold mb-4">Dina chattar</h2>
+
         {conversations.map((conv) => {
-          const otherId =
-            conv.participant_a === myUserId
-              ? conv.participant_b
-              : conv.participant_a;
+          const otherId = conv.participant_a === myUserId ? conv.participant_b : conv.participant_a;
           const otherName = userMap[otherId] ?? "Okänd";
 
           return (
             <div
               key={conv.id}
-              onClick={() => setSelectedConversation(conv)}
+              onClick={() => {
+                setSelectedConversation(conv);
+                setSelectedGroup(null);
+              }}
               className="cursor-pointer hover:bg-gray-200 p-2 rounded"
             >
               <div>{otherName}</div>
@@ -196,7 +229,7 @@ const ChatPage = () => {
 
         <hr className="my-4" />
 
-        <h3 className="text-md font-semibold">Starta ny chatt</h3>
+        <h3 className="text-md font-semibold mb-2">Starta ny chatt</h3>
         {teammates.map((mate) => (
           <div
             key={mate.id}
@@ -204,6 +237,24 @@ const ChatPage = () => {
             className="cursor-pointer hover:bg-green-100 p-2 rounded text-sm"
           >
             {mate.name || "Okänd spelare"}
+          </div>
+        ))}
+
+        <hr className="my-4" />
+
+        <GroupChatCreator currentUserId={myUserId!} />
+
+        <h3 className="text-md font-semibold mt-6 mb-2">Gruppchattar</h3>
+        {groupChats.map((group) => (
+          <div
+            key={group.id}
+            onClick={() => {
+              setSelectedGroup(group);
+              setSelectedConversation(null);
+            }}
+            className="cursor-pointer hover:bg-blue-100 p-2 rounded text-sm"
+          >
+            {group.name}
           </div>
         ))}
       </aside>
@@ -225,7 +276,7 @@ const ChatPage = () => {
           ))}
         </div>
 
-        {selectedConversation && (
+        {(selectedConversation || selectedGroup) && (
           <form onSubmit={handleSendMessage} className="mt-4 flex">
             <input
               type="text"
