@@ -42,3 +42,6 @@ Git-historiken i detta repo kan se ovanlig ut på grund av initiala problem med 
 
 För stabilare arbete bytte jag till ThinLinc och fortsatte utvecklingen i en ny `master`-branch. Den gamla `main`-branchen finns kvar med tidiga commits dock inte allt då en liten del försvann i processen.
 
+
+Videos:
+-Project: https://www.youtube.com/watch?v=RKF0b1V8nj0&ab_channel=RamonIbrahim
