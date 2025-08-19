@@ -45,4 +45,3 @@ För stabilare arbete bytte jag till ThinLinc och fortsatte utvecklingen i en ny
 
 Videos:
 -Project: https://www.youtube.com/watch?v=RKF0b1V8nj0&ab_channel=RamonIbrahim
--Code: https://drive.google.com/file/d/1Aeja_351x1xMZ2zF-m6pbh8_y949cFLR/view?usp=sharing
